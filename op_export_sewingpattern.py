@@ -18,6 +18,7 @@ class Export_Sewingpattern(bpy.types.Operator):
     bl_idname = "object.export_sewingpattern"
     bl_label = "Export Sewing Pattern"
     bl_options = {'REGISTER', 'UNDO'}
+    current_alignment_number = 0
 
     filepath: StringProperty(
         subtype='FILE_PATH',
@@ -35,6 +36,8 @@ class Export_Sewingpattern(bpy.types.Operator):
         description="Exports matching colored lines on the borders of sewing patterns to assist with alignment",
         default='AUTO',
     )
+    alignment_numbers: bpy.props.BoolProperty(name="Alignment Numbers", default=True)
+    aligment_number_font_size: bpy.props.FloatProperty(name="Font Size", default=12.0)
     file_format: EnumProperty(
         items=(
             ('SVG', "Scalable Vector Graphic (.svg)",
@@ -97,6 +100,10 @@ class Export_Sewingpattern(bpy.types.Operator):
 
         document_scale = 1000.0 #millimeter
         document_scale *= obj["S2S_UVtoWORLDscale"]
+
+        self.current_alignment_number = 0
+        alignment_number_dictionary = dict()
+        position_dictionary = dict()
 
         svgstring = '<svg xmlns="http://www.w3.org/2000/svg"\n viewBox="0 0 ' + str(document_scale) + ' ' + str(document_scale) +'"\n'
         svgstring += 'width="' + str(document_scale) + 'mm" height="' + str(document_scale) + 'mm">'
@@ -189,7 +196,7 @@ class Export_Sewingpattern(bpy.types.Operator):
                         for w in l.vert.link_edges:
                             if w.is_wire and w.seam:
                                 has_wire = True
-                                svgstring += self.add_alignment_marker(l, w, uv_layer, document_scale)
+                                svgstring += self.add_alignment_marker(l, w, uv_layer, document_scale, alignment_number_dictionary, position_dictionary)
 
             svgstring += '</g>'
 
@@ -200,7 +207,7 @@ class Export_Sewingpattern(bpy.types.Operator):
             
         bpy.ops.object.mode_set(mode='OBJECT')
         
-    def add_alignment_marker(self, loop, wire, uv_layer, document_scale):
+    def add_alignment_marker(self, loop, wire, uv_layer, document_scale, hashDictionary, positionDictionary):
         wire_dir = mathutils.Vector((0,0));
         for l in loop.vert.link_edges:
             if (len(l.link_loops) > 0 and len(l.link_faces) == 1):
@@ -217,25 +224,62 @@ class Export_Sewingpattern(bpy.types.Operator):
         
         sew_color = mathutils.Color((1,0,0))
         color_hash = (hash(wire))
+
+        alignment_number = -1
+        if color_hash in hashDictionary:
+            alignment_number = hashDictionary[color_hash]
+        else:
+            alignment_number = self.current_alignment_number
+            self.current_alignment_number += 1
+            hashDictionary[color_hash] = alignment_number
+        
         color_hash /= 100000000.0
         color_hash *= 1345235.23523
         color_hash %= 1.0
         sew_color.hsv = color_hash, 1, 1
         sew_color_hex = "#%.2x%.2x%.2x" % (int(sew_color.r * 255), int(sew_color.g * 255), int(sew_color.b * 255))
         
-        returnstring = '<path class="sewinguide" stroke="' + sew_color_hex + '" d="M '
         uv1 = loop[uv_layer].uv.copy();
         uv1.y = 1-uv1.y;
-        returnstring += str((uv1.x + wire_dir.x) * document_scale)
+
+        x_position = (uv1.x + wire_dir.x) * document_scale
+        y_position = (uv1.y + wire_dir.y) * document_scale
+        x1_position = (uv1.x - wire_dir.x) * document_scale
+        y2_position = (uv1.y - wire_dir.y) * document_scale
+        
+        # a line can start or end in the same spot
+        # check to make sure we're not spawning
+        # lines and duplicate numbers in the same spot
+        lineHash = str(round(x_position)) + str(round(y_position)) + str(round(x1_position)) + str(round(y2_position))
+        alternateLineHash = str(round(x1_position)) + str(round(y2_position)) + str(round(x_position)) + str(round(y_position))
+
+        if lineHash in positionDictionary or alternateLineHash in positionDictionary:
+            return ''
+
+        positionDictionary[lineHash] = True
+        positionDictionary[alternateLineHash] = True
+
+        returnstring = '<path class="sewinguide" stroke="' + sew_color_hex + '" d="M '
+        returnstring += str(x_position)
         returnstring += ','
-        returnstring += str((uv1.y + wire_dir.y) * document_scale)
+        returnstring += str(y_position)
         returnstring += ' '
-    
-        returnstring += str((uv1.x - wire_dir.x) * document_scale)
+
+        returnstring += str(x1_position)
         returnstring += ','
-        returnstring += str((uv1.y - wire_dir.y) * document_scale)
+        returnstring += str(y2_position)
         returnstring += ' '
         returnstring += '"/>\n'  
+
+        returnstring += '<text x="'
+        returnstring += str(x1_position)
+        returnstring += 'px" y="'
+        returnstring += str(y2_position)
+        returnstring += 'px" style="font-family:\'ArialMT\', \'Arial\';font-size:'
+        returnstring += str(self.aligment_number_font_size)
+        returnstring += 'px;">'
+        returnstring += str(alignment_number)
+        returnstring += '</text>\n'
         
         return returnstring
         
