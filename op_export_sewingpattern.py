@@ -187,6 +187,7 @@ class Export_Sewingpattern(bpy.types.Operator):
             svgstring += '"/>'
             
             #print markers
+            marker_list = []
 
             for lg in loop_groups:
                 #markers
@@ -196,7 +197,12 @@ class Export_Sewingpattern(bpy.types.Operator):
                         for w in l.vert.link_edges:
                             if w.is_wire and w.seam:
                                 has_wire = True
-                                svgstring += self.add_alignment_marker(l, w, uv_layer, document_scale, alignment_number_dictionary, position_dictionary)
+                                maybe_marker = self.add_alignment_marker(l, w, uv_layer, document_scale, alignment_number_dictionary, position_dictionary, marker_list,None)
+                                if maybe_marker[0] is True:
+                                    marker_list.append(maybe_marker[1])
+
+            for marker in marker_list:
+                svgstring += marker.text
 
             svgstring += '</g>'
 
@@ -206,8 +212,89 @@ class Export_Sewingpattern(bpy.types.Operator):
             file.write(svgstring)
             
         bpy.ops.object.mode_set(mode='OBJECT')
+    
+    class Marker:
+        def __init__(self, parent, x, y, fontSize, text, id, loop, wire, uv_layer, document_scale, alignment_number_dictionary, position_dictionary, marker_list):
+            self.parent = parent
+            self.id = id
+            self.loop = loop
+            self.wire = wire
+            self.uv_layer = uv_layer
+            self.text = text
+            self.x = x
+            self.y = y
+            self.fontSize = fontSize
+            self.document_scale = document_scale
+            self.alignment_number_dictionary = alignment_number_dictionary
+            self.position_dictionary = position_dictionary
+            self.marker_list = marker_list
+            self.recalculate()
+
+        def recalculate(self):
+            # coordinate system is top left
+            # 0,0 1,0
+            # 0,1 1,1
+
+            # text anchor is top left
+
+            lower_y = self.y + (self.fontSize * 1.1) 
+            lower_right_x = self.x + (self.fontSize * len(str(self.id)) * 0.702)
+            self.upper_right_point = (lower_right_x, self.y)
+            self.upper_left_point = (self.x, self.y)
+            self.lower_right_point = (lower_right_x, lower_y)
+            self.lower_left_point = (self.x,lower_y)
+
+        def resize(self, newFontSize):
+            if newFontSize < 1:
+                return
+            
+            self.fontSize = newFontSize
+            self.recalculate()
+
+            self.text = self.parent.add_alignment_marker(self.loop, self.wire, self.uv_layer, self.document_scale, self.alignment_number_dictionary, self.position_dictionary, self.marker_list, self)[1].text
+
+        def pointIntersects(self, point, upper_left_point, lower_right_point):
+            # coordinate system is top left
+            # 0,0 1,0
+            # 0,1 1,1
+
+            # text anchor is top left
+            x_intersects = point[0] >= upper_left_point[0] and point[0] <= lower_right_point[0]
+            y_intersects = point[1] >= upper_left_point[1] and point[1] <= lower_right_point[1]
         
-    def add_alignment_marker(self, loop, wire, uv_layer, document_scale, hashDictionary, positionDictionary):
+            return x_intersects and y_intersects 
+
+        def intersects(self,other):
+            if other is self:
+                return False
+            
+            other_pos = other.upper_left_point
+            other_end = other.lower_right_point
+
+            #top_left_intersects = self.pointIntersects((self.x,self.y), other_pos, other_end)
+            lower_right_intersects = self.pointIntersects(self.lower_right_point, other_pos, other_end)
+            lower_left_intersects = self.pointIntersects(self.lower_left_point, other_pos, other_end)
+            upper_right_intersects = self.pointIntersects(self.upper_right_point, other_pos, other_end)
+
+            #ignore top_left_intersects intersection, since we're not going to move the points
+            return lower_right_intersects or upper_right_intersects or lower_left_intersects
+
+    def add_text(self,x,y,fontSize,text):
+        returnstring = ''
+
+        returnstring += '<text x="'
+        returnstring += str(x)
+        returnstring += 'px" y="'
+        returnstring += str(y)
+        returnstring += 'px" style="font-family:\'Consolas\', \'Courier New\';font-size:'
+        returnstring += str(fontSize)
+        returnstring += 'px;">'
+        returnstring += str(text)
+        returnstring += '</text>\n'
+
+        return returnstring
+
+    def add_alignment_marker(self, loop, wire, uv_layer, document_scale, hashDictionary, positionDictionary, marker_list,markerInstance):
         wire_dir = mathutils.Vector((0,0));
         for l in loop.vert.link_edges:
             if (len(l.link_loops) > 0 and len(l.link_faces) == 1):
@@ -245,19 +332,20 @@ class Export_Sewingpattern(bpy.types.Operator):
         x_position = (uv1.x + wire_dir.x) * document_scale
         y_position = (uv1.y + wire_dir.y) * document_scale
         x1_position = (uv1.x - wire_dir.x) * document_scale
-        y2_position = (uv1.y - wire_dir.y) * document_scale
+        y1_position = (uv1.y - wire_dir.y) * document_scale
         
         # a line can start or end in the same spot
         # check to make sure we're not spawning
         # lines and duplicate numbers in the same spot
-        lineHash = str(round(x_position)) + str(round(y_position)) + str(round(x1_position)) + str(round(y2_position))
-        alternateLineHash = str(round(x1_position)) + str(round(y2_position)) + str(round(x_position)) + str(round(y_position))
+        lineHash = str(round(x_position)) + str(round(y_position)) + str(round(x1_position)) + str(round(y1_position))
+        alternateLineHash = str(round(x1_position)) + str(round(y1_position)) + str(round(x_position)) + str(round(y_position))
 
-        if lineHash in positionDictionary or alternateLineHash in positionDictionary:
-            return ''
+        if(markerInstance is None):
+            if lineHash in positionDictionary or alternateLineHash in positionDictionary:
+                return (False,)
 
-        positionDictionary[lineHash] = True
-        positionDictionary[alternateLineHash] = True
+            positionDictionary[lineHash] = True
+            positionDictionary[alternateLineHash] = True
 
         returnstring = '<path class="sewinguide" stroke="' + sew_color_hex + '" d="M '
         returnstring += str(x_position)
@@ -267,22 +355,56 @@ class Export_Sewingpattern(bpy.types.Operator):
 
         returnstring += str(x1_position)
         returnstring += ','
-        returnstring += str(y2_position)
+        returnstring += str(y1_position)
         returnstring += ' '
         returnstring += '"/>\n'  
 
-        returnstring += '<text x="'
-        returnstring += str(x1_position)
-        returnstring += 'px" y="'
-        returnstring += str(y2_position)
-        returnstring += 'px" style="font-family:\'ArialMT\', \'Arial\';font-size:'
-        returnstring += str(self.aligment_number_font_size)
-        returnstring += 'px;">'
-        returnstring += str(alignment_number)
-        returnstring += '</text>\n'
+        fontSize = markerInstance.fontSize if markerInstance is not None else self.aligment_number_font_size
+
+        returnstring += self.add_text(x1_position,y1_position,fontSize,alignment_number)
         
-        return returnstring
+        result = markerInstance if markerInstance is not None else Export_Sewingpattern.Marker(self, 
+                        x1_position,
+                        y1_position,
+                        self.aligment_number_font_size, 
+                        returnstring, 
+                        alignment_number,
+                        loop, 
+                        wire, 
+                        uv_layer, 
+                        document_scale, 
+                        hashDictionary, 
+                        positionDictionary, 
+                        marker_list
+                        )
         
+        result.text = returnstring
+
+        # make sure the none of the markers collide, and if they do resize them so they no longer collide
+        i = 0
+        while i < len(marker_list): 
+            other = marker_list[i]
+            if other.id is result.id:
+                i += 1
+                continue
+            if (other.intersects(result)) and (other.fontSize > 1 or result.fontSize > 1):
+                
+                if other.fontSize > result.fontSize:
+                    other.resize(other.fontSize - 1)
+                elif other.fontSize < result.fontSize:
+                    result.resize(result.fontSize - 1)
+                else:
+                    result.resize(result.fontSize - 1)
+                    other.resize(other.fontSize - 1)
+                
+                continue
+            i += 1
+
+        return (True, result)
+        
+    def debug(self,text):
+        self.report({'WARNING'}, text)
+
     def auto_detect_markers(self):
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_mode(type="EDGE")
