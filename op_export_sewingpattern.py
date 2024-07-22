@@ -38,6 +38,8 @@ class Export_Sewingpattern(bpy.types.Operator):
     )
     alignment_numbers: bpy.props.BoolProperty(name="Alignment Numbers", default=True)
     aligment_number_font_size: bpy.props.FloatProperty(name="Font Size", default=12.0)
+    show_peice_ids: bpy.props.BoolProperty(name="Piece IDs", default=True)
+    piece_id_font_size: bpy.props.FloatProperty(name="Piece Label Size", default=30.0)
     file_format: EnumProperty(
         items=(
             ('SVG', "Scalable Vector Graphic (.svg)",
@@ -89,6 +91,14 @@ class Export_Sewingpattern(bpy.types.Operator):
 
         return {'FINISHED'}
     
+    def get_piece_name(self,n):
+        result = []
+        while n > 0:
+            n -= 1
+            result.append(chr(n % 26 + ord('A')))
+            n //= 26
+        return ''.join(result[::-1])
+
     def export(self, filepath):
         #get loops:
         bpy.ops.object.mode_set(mode='EDIT')
@@ -104,6 +114,9 @@ class Export_Sewingpattern(bpy.types.Operator):
         self.current_alignment_number = 0
         alignment_number_dictionary = dict()
         position_dictionary = dict()
+        piece_dictionary = dict()
+        letters = "abcdefghijklmnopqrstuvwyxtuv".upper()
+        current_letter = 0
 
         svgstring = '<svg xmlns="http://www.w3.org/2000/svg"\n viewBox="0 0 ' + str(document_scale) + ' ' + str(document_scale) +'"\n'
         svgstring += 'width="' + str(document_scale) + 'mm" height="' + str(document_scale) + 'mm">'
@@ -170,6 +183,10 @@ class Export_Sewingpattern(bpy.types.Operator):
             svgstring += '\n<g>'
             svgstring += '<path class="seam" d="'
 
+            center_x = 0
+            center_y = 0
+            number_of_points = 0
+
             for lg in loop_groups:
                 if (len(lg) == 0):
                     continue
@@ -179,13 +196,27 @@ class Export_Sewingpattern(bpy.types.Operator):
 
                 for l in lg:
                     uv = l[uv_layer].uv.copy()
-                    svgstring += str(uv.x*document_scale)
+                    x = uv.x*document_scale
+                    y = (1-uv.y)*document_scale
+                    center_x += x
+                    center_y += y
+                    number_of_points += 1
+                    svgstring += str(x)
                     svgstring += ','
-                    svgstring += str((1-uv.y)*document_scale)
+                    svgstring += str(y)
                     svgstring += ' '
 
             svgstring += '"/>'
             
+            center_x = center_x/number_of_points
+            center_y = center_y/number_of_points
+
+            current_letter = (current_letter + 1)
+            letter = self.get_piece_name(current_letter)
+
+            if self.show_peice_ids:
+                svgstring += self.add_text(center_x,center_y,self.piece_id_font_size,str(letter))
+
             #print markers
             marker_list = []
 
