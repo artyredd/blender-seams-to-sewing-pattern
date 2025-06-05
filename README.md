@@ -66,3 +66,7 @@ See also:\
 
 # Known Issues
 - UV's are messed up after Remesh
+
+# Credits
+This projects includes code from MeasureIt by MeasureIt by the Blender Community, licensed under GPLv3+
+See: https://extensions.blender.org/add-ons/measureit
